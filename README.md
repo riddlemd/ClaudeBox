@@ -36,8 +36,13 @@ run as root when permissions are skipped.
 
 ## Prerequisites
 
-- **Docker** — [Docker Desktop](https://www.docker.com/products/docker-desktop/) or
-  [Rancher Desktop](https://rancherdesktop.io/). Make sure the Docker daemon is running.
+- **Docker** — any Docker-compatible engine works. Two common options:
+  - [**Rancher Desktop**](https://rancherdesktop.io/) — free and open-source (SUSE). Bundles a
+    Docker-compatible CLI and runtime; a good default if you want no licensing strings.
+  - [**Docker Desktop**](https://www.docker.com/products/docker-desktop/) — free for personal
+    use, education, and small businesses, but larger organizations need a paid subscription.
+
+  Either way, make sure the engine is installed and its daemon is running before you launch.
 - **Auth** — either an `ANTHROPIC_API_KEY` environment variable, or an existing Claude Code
   login on your host (`~/.claude/.credentials.json`).
 
