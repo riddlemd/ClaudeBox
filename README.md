@@ -290,8 +290,8 @@ config, so concurrent sessions don't interfere with each other.
   its own writable config. Your real `~/.claude` is never modified.
 - **The `host` base is curated** so the agent can't read your full `~/.claude`. Session history,
   caches, and `plugins/` never enter the container. The one broad exposure is `~/.claude.json`
-  (mounted only under the `host` base), which contains setup state such as your account id and
-  MCP server definitions — if that matters to you, use `CLAUDE_BASE=repo` instead.
+  (mounted only when you opt into `CLAUDE_BASE=host`), which contains setup state such as your
+  account id and MCP server definitions — the default `repo` base avoids it entirely.
 - The agent only has access to what you mount: `/workspace` (read-write) and the read-only host
   files above. It cannot reach the rest of your filesystem.
 - `--dangerously-skip-permissions` means the agent acts without asking. The container is the
