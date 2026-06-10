@@ -7,8 +7,15 @@ if (-not (Get-Command docker -ErrorAction SilentlyContinue)) {
     exit 1
 }
 
+# Build the image on first run (or if it was removed).
+if (-not (docker images -q claude-sandbox)) {
+    Write-Host "Building claude-sandbox image..."
+    docker build -t claude-sandbox $PSScriptRoot
+    if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+}
+
 $claudeHome  = Join-Path $PSScriptRoot "claude-home"
-$credsSource = "C:\Users\$env:USERNAME\.claude\.credentials.json"
+$credsSource = Join-Path $env:USERPROFILE ".claude\.credentials.json"
 
 $dockerArgs = @("run", "-it", "--rm",
     "-v", "${ProjectPath}:/workspace",
@@ -25,7 +32,7 @@ if (Test-Path $credsSource) {
     exit 1
 }
 
-$claudeJsonSource = "C:\Users\$env:USERNAME\.claude.json"
+$claudeJsonSource = Join-Path $env:USERPROFILE ".claude.json"
 if (Test-Path $claudeJsonSource) {
     $dockerArgs += "-v", "${claudeJsonSource}:/tmp/host-claude.json:ro"
 }

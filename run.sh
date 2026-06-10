@@ -10,6 +10,12 @@ if [[ -z "${ANTHROPIC_API_KEY:-}" ]] && [[ ! -f "$HOST_CREDS" ]]; then
     exit 1
 fi
 
+# Build the image on first run (or if it was removed).
+if [[ -z "$(docker images -q claude-sandbox 2>/dev/null)" ]]; then
+    echo "Building claude-sandbox image..."
+    docker build -t claude-sandbox "$SCRIPT_DIR"
+fi
+
 CREDS_MOUNT=()
 [[ -f "$HOST_CREDS" ]] && CREDS_MOUNT=(-v "${HOST_CREDS}:/tmp/host-credentials.json:ro")
 
