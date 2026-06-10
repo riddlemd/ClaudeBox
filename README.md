@@ -251,3 +251,7 @@ Yes. Each launcher invocation starts an independent `--rm` container. They share
   `/workspace` and the credential mounts above.
 - `--dangerously-skip-permissions` means the agent acts without asking. The container is the
   safety boundary — don't mount directories you aren't willing to let it modify.
+
+## License
+
+Released under the [MIT License](LICENSE).
