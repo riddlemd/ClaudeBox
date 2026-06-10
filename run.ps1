@@ -1,7 +1,8 @@
 param(
     [string]$ProjectPath = (Get-Location).Path,
-    # Base config source: host (curated copy of ~/.claude), repo (committed template), or empty.
-    [string]$Base = $(if ($env:CLAUDE_BASE) { $env:CLAUDE_BASE } else { "host" })
+    # Base config source: repo (committed template), host (curated copy of ~/.claude), or empty.
+    # Credentials are copied from ~/.claude regardless of the base.
+    [string]$Base = $(if ($env:CLAUDE_BASE) { $env:CLAUDE_BASE } else { "repo" })
 )
 
 if (-not (Get-Command docker -ErrorAction SilentlyContinue)) {

@@ -5,8 +5,9 @@ PROJECT_PATH="${1:-$(pwd)}"
 HOST_CLAUDE_DIR="${2:-$HOME/.claude}"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-# Base config source: host (curated copy of ~/.claude), repo (committed template), or empty.
-CLAUDE_BASE="${CLAUDE_BASE:-host}"
+# Base config source: repo (committed template), host (curated copy of ~/.claude), or empty.
+# Credentials are copied from ~/.claude regardless of the base (see HOST_CREDS below).
+CLAUDE_BASE="${CLAUDE_BASE:-repo}"
 
 # Config files copied from the host when CLAUDE_BASE=host. Deliberately excludes runtime state
 # (sessions/, projects/, history.jsonl), caches, credentials (mounted separately), and plugins/

@@ -54,23 +54,23 @@ chown -R claude:claude "$CLAUDE_DIR"
 # Only inherit the host's copy under the host base; for repo/empty write a minimal file so the
 # sandbox doesn't carry over host projects, MCP servers, or trust decisions. In every case we
 # set:
-#   installMethod=npm-global          - the host says "native", but we install via npm here
-#   /workspace trusted                - skips the folder-trust prompt
-#   skipDangerousModePermissionPrompt - skips the "Bypass Permissions mode" warning, which
-#                                       otherwise reappears on every fresh container. Forced
-#                                       true whether the property was missing or false.
+#   installMethod=npm-global  - the host says "native", but we install via npm here
+#   hasCompletedOnboarding    - skips the first-run setup wizard (theme/login/etc.) so the
+#                               container never asks the user for any details
+#   /workspace trusted        - skips the folder-trust prompt
+# (The theme itself is set in claude-default/settings.json, so no theme picker appears either.)
 if [[ "$CLAUDE_BASE" == host && -f /tmp/host-claude.json ]]; then
     node -e "
 const fs = require('fs');
 const c = JSON.parse(fs.readFileSync('/tmp/host-claude.json', 'utf8'));
 c.installMethod = 'npm-global';
-c.skipDangerousModePermissionPrompt = true;
+c.hasCompletedOnboarding = true;
 if (!c.projects) c.projects = {};
 c.projects['/workspace'] = Object.assign(c.projects['/workspace'] || {}, { hasTrustDialogAccepted: true });
 fs.writeFileSync('/home/claude/.claude.json', JSON.stringify(c));
 "
 else
-    printf '{"firstStartTime":"%s","installMethod":"npm-global","skipDangerousModePermissionPrompt":true,"projects":{"/workspace":{"hasTrustDialogAccepted":true}}}\n' \
+    printf '{"firstStartTime":"%s","installMethod":"npm-global","hasCompletedOnboarding":true,"projects":{"/workspace":{"hasTrustDialogAccepted":true}}}\n' \
         "$(date -u +%Y-%m-%dT%H:%M:%S.000Z)" > /home/claude/.claude.json
 fi
 chown claude:claude /home/claude/.claude.json

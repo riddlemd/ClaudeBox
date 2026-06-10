@@ -124,23 +124,26 @@ docker build --no-cache -t claude-sandbox .
 
 On startup the container seeds its **own writable `~/.claude`** from a read-only *base*, then
 works only on that copy. Your host config and the repo template are never written to, and the
-copy is discarded when the container exits (state is ephemeral). The base is chosen with the
-`CLAUDE_BASE` variable:
+copy is discarded when the container exits (state is ephemeral). All entry points default to the
+`repo` base; choose another with the `CLAUDE_BASE` variable:
 
-| `CLAUDE_BASE` | Seeds from                                                                 | Default for      |
-| ------------- | -------------------------------------------------------------------------- | ---------------- |
-| `host`        | A **curated copy** of your real `~/.claude` (see allowlist below).          | `run.sh` / `run.ps1` |
-| `repo`        | The committed **`claude-default/`** template baked into the image.          | `docker compose` |
-| `empty`       | Nothing — a clean sandbox.                                                   | —                |
+| `CLAUDE_BASE`    | Seeds from                                                                 |
+| ---------------- | -------------------------------------------------------------------------- |
+| `repo` (default) | The committed **`claude-default/`** template baked into the image.          |
+| `host`           | A **curated copy** of your real `~/.claude` (see allowlist below). Run scripts only. |
+| `empty`          | Nothing — a clean sandbox.                                                  |
+
+Credentials are **not** part of the base — they're always copied from your host `~/.claude`
+(see [How authentication works](#how-authentication-works)), so every base can authenticate.
 
 ```bash
 # Linux/macOS — override the default:
-CLAUDE_BASE=repo  ./run.sh
+CLAUDE_BASE=host  ./run.sh
 CLAUDE_BASE=empty ./run.sh
 ```
 ```powershell
 # Windows — via -Base or the CLAUDE_BASE env var:
-.\run.ps1 -Base repo
+.\run.ps1 -Base host
 .\run.ps1 -Base empty
 ```
 
@@ -156,9 +159,9 @@ agents/  commands/  skills/  hooks/  output-styles/
 Deliberately **excluded**: session history (`projects/`, `sessions/`, `history.jsonl`), caches,
 `plugins/` (often platform-specific binaries), and `.credentials.json` (handled separately).
 
-> Docker Compose can't portably reference your host `~/.claude` across operating systems, so it
-> defaults to the `repo` base. Asking it for `CLAUDE_BASE=host` falls back to `repo` with a
-> warning — use `run.sh` / `run.ps1` if you want your host config.
+> The `host` base is only available through `run.sh` / `run.ps1` — Docker Compose can't portably
+> reference your host `~/.claude` across operating systems. Requesting `CLAUDE_BASE=host` under
+> Compose falls back to `repo` with a warning.
 
 ## How authentication works
 
@@ -182,9 +185,9 @@ off to Claude Code:
 3. **Hands ownership** of `~/.claude` to the unprivileged `claude` user (the seed copy ran as
    root).
 4. **Writes `~/.claude.json`** — patches your mounted host copy under the `host` base, or writes
-   a minimal fresh one otherwise. Either way it sets `installMethod: npm-global`, trusts
-   `/workspace`, and sets `skipDangerousModePermissionPrompt: true`, skipping all first-run
-   prompts (including the "Bypass Permissions mode" warning).
+   a minimal fresh one otherwise. Either way it sets `installMethod: npm-global`,
+   `hasCompletedOnboarding: true`, and trusts `/workspace`, so Claude Code skips the setup wizard
+   and folder-trust prompt and never asks the user for any details.
 5. **Drops privileges** with `su-exec` to the `claude` user, disables RTK telemetry, installs
    the RTK hook, and finally launches:
 
@@ -208,8 +211,8 @@ container's working config (`/home/claude/.claude`) is its own ephemeral directo
 
 - **The `repo` base template** lives in `claude-default/`. Edit `claude-default/settings.json`
   to change the container's theme, hooks, or other Claude Code settings; edit
-  `claude-default/CLAUDE.md` to give the in-container agent standing instructions. These take
-  effect under `CLAUDE_BASE=repo` (and Compose). Rebuild after editing so they're re-baked.
+  `claude-default/CLAUDE.md` to give the in-container agent standing instructions. Since `repo`
+  is the default base, these apply on a normal run. Rebuild after editing so they're re-baked.
 - **The config base** is chosen per run with [`CLAUDE_BASE`](#configuration-base)
   (`host` / `repo` / `empty`).
 - **The host allowlist** (what `CLAUDE_BASE=host` copies) is the `HOST_ALLOWLIST` array in
@@ -226,7 +229,7 @@ container's working config (`/home/claude/.claude`) is its own ephemeral directo
 | -------------------- | ---------------------------------------------------------------- |
 | `Dockerfile`         | Builds the Alpine image with Node, git, RTK, Claude Code, and the baked-in `claude-default/` template. |
 | `entrypoint.sh`      | Seeds `~/.claude` from the chosen base, installs credentials, drops to the `claude` user, launches Claude Code. |
-| `run.ps1`            | Windows launcher — builds the image if missing, stages the curated host base, runs the container. |
+| `run.ps1`            | Windows launcher — builds the image if missing, mounts credentials, stages the curated host base when `-Base host`, runs the container. |
 | `run.sh`             | Linux/macOS launcher — same behavior as `run.ps1`.              |
 | `docker-compose.yml` | Compose entry point; defaults to the `repo` base.               |
 | `claude-default/`    | The committed `repo` base template (`settings.json`, `CLAUDE.md`, `RTK.md`), baked into the image read-only. The container never writes here. |
