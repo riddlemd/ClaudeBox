@@ -12,6 +12,5 @@
       }
     ]
   },
-  "theme": "dark",
-  "skipDangerousModePermissionPrompt": true
+  "theme": "dark"
 }
