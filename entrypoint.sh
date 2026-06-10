@@ -56,20 +56,21 @@ chown -R claude:claude "$CLAUDE_DIR"
 # set:
 #   installMethod=npm-global          - the host says "native", but we install via npm here
 #   /workspace trusted                - skips the folder-trust prompt
-#   bypassPermissionsModeAccepted     - skips the one-time "Bypass Permissions mode" warning,
-#                                       which would otherwise reappear on every fresh container
+#   skipDangerousModePermissionPrompt - skips the "Bypass Permissions mode" warning, which
+#                                       otherwise reappears on every fresh container. Forced
+#                                       true whether the property was missing or false.
 if [[ "$CLAUDE_BASE" == host && -f /tmp/host-claude.json ]]; then
     node -e "
 const fs = require('fs');
 const c = JSON.parse(fs.readFileSync('/tmp/host-claude.json', 'utf8'));
 c.installMethod = 'npm-global';
-c.bypassPermissionsModeAccepted = true;
+c.skipDangerousModePermissionPrompt = true;
 if (!c.projects) c.projects = {};
 c.projects['/workspace'] = Object.assign(c.projects['/workspace'] || {}, { hasTrustDialogAccepted: true });
 fs.writeFileSync('/home/claude/.claude.json', JSON.stringify(c));
 "
 else
-    printf '{"firstStartTime":"%s","installMethod":"npm-global","bypassPermissionsModeAccepted":true,"projects":{"/workspace":{"hasTrustDialogAccepted":true}}}\n' \
+    printf '{"firstStartTime":"%s","installMethod":"npm-global","skipDangerousModePermissionPrompt":true,"projects":{"/workspace":{"hasTrustDialogAccepted":true}}}\n' \
         "$(date -u +%Y-%m-%dT%H:%M:%S.000Z)" > /home/claude/.claude.json
 fi
 chown claude:claude /home/claude/.claude.json

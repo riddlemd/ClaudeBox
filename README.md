@@ -85,8 +85,6 @@ C:\path\to\ClaudeBox\run.ps1
 C:\path\to\ClaudeBox\run.ps1 -ProjectPath C:\some\other\project
 ```
 
-The image is built automatically if it doesn't exist yet.
-
 ### Linux / macOS
 
 ```bash
@@ -99,8 +97,6 @@ The image is built automatically if it doesn't exist yet.
 # ...and optionally a custom host ~/.claude directory as the second:
 /path/to/ClaudeBox/run.sh /some/other/project /path/to/.claude
 ```
-
-The image is built automatically if it doesn't exist yet.
 
 ### Docker Compose
 
@@ -173,10 +169,6 @@ Credentials are handled **independently of the base**, so any base can authentic
 - **API key** — if you set `ANTHROPIC_API_KEY`, it's passed through to the container.
 
 If neither is available, the run scripts exit with an error before starting the container.
-`entrypoint.sh` also writes `~/.claude.json` so Claude Code sees `installMethod: npm-global`,
-trusts `/workspace`, and skips the "Bypass Permissions mode" warning. Under the `host` base it
-inherits and patches your host `~/.claude.json`; under `repo`/`empty` it writes a minimal one
-so the sandbox carries over none of your host projects, MCP servers, or trust decisions.
 
 ## How it works
 
@@ -191,7 +183,8 @@ off to Claude Code:
    root).
 4. **Writes `~/.claude.json`** — patches your mounted host copy under the `host` base, or writes
    a minimal fresh one otherwise. Either way it sets `installMethod: npm-global`, trusts
-   `/workspace`, and pre-accepts Bypass Permissions mode, skipping all first-run prompts.
+   `/workspace`, and sets `skipDangerousModePermissionPrompt: true`, skipping all first-run
+   prompts (including the "Bypass Permissions mode" warning).
 5. **Drops privileges** with `su-exec` to the `claude` user, disables RTK telemetry, installs
    the RTK hook, and finally launches:
 
@@ -279,15 +272,6 @@ The launchers only build when the image is *absent*. After editing the `Dockerfi
 explicitly: `docker build -t claude-sandbox .` (add `--no-cache` to bypass the layer cache).
 
 ## FAQ
-
-**Is my host filesystem safe?**
-The agent can only reach what's mounted: `/workspace` and the read-only credential files. It
-cannot touch anything else on your machine.
-
-**Where do sessions and history go?**
-Into the container's own ephemeral `~/.claude`, which is discarded when the container exits.
-Nothing is written back to your host or the repo. (If you need session persistence across runs,
-that's a deliberate non-goal of the current ephemeral design.)
 
 **Does it work offline?**
 No — Claude Code calls the Anthropic API. You need network access and valid credentials.
