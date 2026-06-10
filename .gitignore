@@ -1,0 +1,9 @@
+# Claude runtime data — credentials and session state should never be committed
+claude-home/.credentials.json
+claude-home/sessions/
+claude-home/projects/
+claude-home/session-env/
+claude-home/shell-snapshots/
+claude-home/backups/
+claude-home/cache/
+claude-home/history.jsonl

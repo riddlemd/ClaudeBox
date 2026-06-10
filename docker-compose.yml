@@ -1,0 +1,10 @@
+services:
+  claude:
+    build: .
+    environment:
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
+    volumes:
+      - ${WORKSPACE:-.}:/workspace        # mount current dir, or override with WORKSPACE=
+      - ./claude-home:/home/claude/.claude  # project-local config, not the host ~/.claude
+    stdin_open: true
+    tty: true
