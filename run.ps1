@@ -1,5 +1,7 @@
 param(
-    [string]$ProjectPath = (Get-Location).Path
+    [string]$ProjectPath = (Get-Location).Path,
+    # Base config source: host (curated copy of ~/.claude), repo (committed template), or empty.
+    [string]$Base = $(if ($env:CLAUDE_BASE) { $env:CLAUDE_BASE } else { "host" })
 )
 
 if (-not (Get-Command docker -ErrorAction SilentlyContinue)) {
@@ -14,29 +16,58 @@ if (-not (docker images -q claude-sandbox)) {
     if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 }
 
-$claudeHome  = Join-Path $PSScriptRoot "claude-home"
-$credsSource = Join-Path $env:USERPROFILE ".claude\.credentials.json"
+$hostClaudeDir = Join-Path $env:USERPROFILE ".claude"
+$credsSource   = Join-Path $hostClaudeDir ".credentials.json"
+$claudeJson    = Join-Path $env:USERPROFILE ".claude.json"
 
-$dockerArgs = @("run", "-it", "--rm",
-    "-v", "${ProjectPath}:/workspace",
-    "-v", "${claudeHome}:/home/claude/.claude")
-
-if ($env:ANTHROPIC_API_KEY) {
-    $dockerArgs += "-e", "ANTHROPIC_API_KEY=$env:ANTHROPIC_API_KEY"
-}
-
-if (Test-Path $credsSource) {
-    $dockerArgs += "-v", "${credsSource}:/tmp/host-credentials.json:ro"
-} elseif (-not $env:ANTHROPIC_API_KEY) {
+if (-not (Test-Path $credsSource) -and -not $env:ANTHROPIC_API_KEY) {
     Write-Error "Set ANTHROPIC_API_KEY or ensure $credsSource exists"
     exit 1
 }
 
-$claudeJsonSource = Join-Path $env:USERPROFILE ".claude.json"
-if (Test-Path $claudeJsonSource) {
-    $dockerArgs += "-v", "${claudeJsonSource}:/tmp/host-claude.json:ro"
+# Config files copied from the host when -Base host. Deliberately excludes runtime state,
+# caches, credentials (mounted separately), and plugins/ (often platform-specific binaries).
+$hostAllowlist = @("settings.json", "settings.local.json", "CLAUDE.md", "CLAUDE.local.md",
+                   "agents", "commands", "skills", "hooks", "output-styles")
+
+$dockerArgs = @("run", "-it", "--rm",
+    "-e", "CLAUDE_BASE=$Base",
+    "-v", "${ProjectPath}:/workspace")
+
+if ($env:ANTHROPIC_API_KEY) {
+    $dockerArgs += "-e", "ANTHROPIC_API_KEY=$env:ANTHROPIC_API_KEY"
+}
+if (Test-Path $credsSource) {
+    $dockerArgs += "-v", "${credsSource}:/tmp/host-credentials.json:ro"
 }
 
-$dockerArgs += "claude-sandbox"
-docker @dockerArgs
-exit $LASTEXITCODE
+$staging = $null
+$code = 0
+try {
+    # Host base: stage a curated copy of the allowlist and mount THAT read-only, so the agent
+    # can never read your full ~/.claude. Also inherit ~/.claude.json (setup state).
+    if ($Base -eq "host" -and (Test-Path $hostClaudeDir)) {
+        $staging = Join-Path $env:TEMP ("claudebox-" + [System.Guid]::NewGuid().ToString("N"))
+        New-Item -ItemType Directory -Path $staging | Out-Null
+        foreach ($item in $hostAllowlist) {
+            $src = Join-Path $hostClaudeDir $item
+            if (Test-Path $src) {
+                Copy-Item -Recurse -Force $src (Join-Path $staging (Split-Path $src -Leaf))
+            }
+        }
+        $dockerArgs += "-v", "${staging}:/opt/host-claude:ro"
+        if (Test-Path $claudeJson) {
+            $dockerArgs += "-v", "${claudeJson}:/tmp/host-claude.json:ro"
+        }
+    }
+
+    $dockerArgs += "claude-sandbox"
+    docker @dockerArgs
+    $code = $LASTEXITCODE
+} finally {
+    if ($staging -and (Test-Path $staging)) {
+        Remove-Item -Recurse -Force $staging
+    }
+}
+
+exit $code

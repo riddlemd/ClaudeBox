@@ -15,8 +15,9 @@ run as root when permissions are skipped.
 - **Run Claude Code unattended.** `--dangerously-skip-permissions` lets the agent act without
   stopping to ask, which is convenient but risky on your real machine. A container bounds the
   blast radius to the directory you mount.
-- **Keep your host config clean.** Container state (sessions, history, caches) lands in the
-  project-local `claude-home/` folder instead of your real `~/.claude`.
+- **Keep your host config clean.** The container works on a *copy* of your config and writes
+  nothing back — your real `~/.claude` is never modified. Session state is ephemeral and
+  discarded when the container exits.
 - **Reproducible environment.** Everyone gets the same Node, git, and CLI versions regardless
   of what's installed on the host.
 
@@ -25,6 +26,7 @@ run as root when permissions are skipped.
 - [Prerequisites](#prerequisites)
 - [Quick start](#quick-start)
 - [Usage](#usage)
+- [Configuration base](#configuration-base)
 - [How authentication works](#how-authentication-works)
 - [How it works](#how-it-works)
 - [What's mounted](#whats-mounted)
@@ -94,8 +96,8 @@ The image is built automatically if it doesn't exist yet.
 # Pass a project path as the first argument:
 /path/to/ClaudeBox/run.sh /some/other/project
 
-# ...and optionally a custom host credentials path as the second:
-/path/to/ClaudeBox/run.sh /some/other/project /path/to/.credentials.json
+# ...and optionally a custom host ~/.claude directory as the second:
+/path/to/ClaudeBox/run.sh /some/other/project /path/to/.claude
 ```
 
 The image is built automatically if it doesn't exist yet.
@@ -122,37 +124,75 @@ docker build -t claude-sandbox .
 docker build --no-cache -t claude-sandbox .
 ```
 
+## Configuration base
+
+On startup the container seeds its **own writable `~/.claude`** from a read-only *base*, then
+works only on that copy. Your host config and the repo template are never written to, and the
+copy is discarded when the container exits (state is ephemeral). The base is chosen with the
+`CLAUDE_BASE` variable:
+
+| `CLAUDE_BASE` | Seeds from                                                                 | Default for      |
+| ------------- | -------------------------------------------------------------------------- | ---------------- |
+| `host`        | A **curated copy** of your real `~/.claude` (see allowlist below).          | `run.sh` / `run.ps1` |
+| `repo`        | The committed **`claude-default/`** template baked into the image.          | `docker compose` |
+| `empty`       | Nothing — a clean sandbox.                                                   | —                |
+
+```bash
+# Linux/macOS — override the default:
+CLAUDE_BASE=repo  ./run.sh
+CLAUDE_BASE=empty ./run.sh
+```
+```powershell
+# Windows — via -Base or the CLAUDE_BASE env var:
+.\run.ps1 -Base repo
+.\run.ps1 -Base empty
+```
+
+**Host base is curated, not a full mount.** When `CLAUDE_BASE=host`, the run scripts copy only
+an allowlist into a temporary directory and mount *that* read-only — the container never sees
+the rest of your `~/.claude`. The allowlist is:
+
+```
+settings.json  settings.local.json  CLAUDE.md  CLAUDE.local.md
+agents/  commands/  skills/  hooks/  output-styles/
+```
+
+Deliberately **excluded**: session history (`projects/`, `sessions/`, `history.jsonl`), caches,
+`plugins/` (often platform-specific binaries), and `.credentials.json` (handled separately).
+
+> Docker Compose can't portably reference your host `~/.claude` across operating systems, so it
+> defaults to the `repo` base. Asking it for `CLAUDE_BASE=host` falls back to `repo` with a
+> warning — use `run.sh` / `run.ps1` if you want your host config.
+
 ## How authentication works
 
-There are **two credential strategies**, and which one applies depends on the entry point —
-this is deliberate, because Docker Compose can't portably reference your host's `~/.claude`
-across Windows, macOS, and Linux.
+Credentials are handled **independently of the base**, so any base can authenticate:
 
-| Entry point          | Credential source                                                                 |
-| -------------------- | --------------------------------------------------------------------------------- |
-| `run.ps1` / `run.sh` | Your **live host login** — mounts `~/.claude/.credentials.json` (and `.claude.json`) read-only into the container, where `entrypoint.sh` copies them into place. Falls back to `ANTHROPIC_API_KEY` if no login exists. |
-| `docker compose`     | The committed **`claude-home/` directory** is mounted as `~/.claude`, plus whatever `ANTHROPIC_API_KEY` you pass. It does not read your host `~/.claude`. |
+- **Host login** — the run scripts mount `~/.claude/.credentials.json` read-only at
+  `/tmp/host-credentials.json`; `entrypoint.sh` copies it into the container's config.
+- **API key** — if you set `ANTHROPIC_API_KEY`, it's passed through to the container.
 
-If neither a credentials file nor `ANTHROPIC_API_KEY` is available, the run scripts exit with
-an error before starting the container.
-
-In both cases, `entrypoint.sh` also patches `~/.claude.json` so Claude Code sees
-`installMethod: npm-global` and trusts `/workspace` without the interactive trust prompt.
+If neither is available, the run scripts exit with an error before starting the container.
+`entrypoint.sh` also writes `~/.claude.json` so Claude Code sees `installMethod: npm-global`,
+trusts `/workspace`, and skips the "Bypass Permissions mode" warning. Under the `host` base it
+inherits and patches your host `~/.claude.json`; under `repo`/`empty` it writes a minimal one
+so the sandbox carries over none of your host projects, MCP servers, or trust decisions.
 
 ## How it works
 
 When a container starts, `entrypoint.sh` runs as root and does the following before handing
 off to Claude Code:
 
-1. **Fixes ownership** of `/home/claude/.claude`. Bind mounts (especially on Windows) appear
-   root-owned inside the container; this lets the unprivileged `claude` user write to its
-   config directory.
+1. **Seeds `~/.claude`** from the selected [base](#configuration-base) (`host`, `repo`, or
+   `empty`) by copying it into the container's own writable config directory.
 2. **Installs credentials** — if `/tmp/host-credentials.json` was mounted (run scripts), it's
    copied to `~/.claude/.credentials.json`.
-3. **Patches `~/.claude.json`** — either by rewriting your mounted host copy (setting
-   `installMethod: npm-global` and marking `/workspace` as trusted) or by writing a minimal
-   fresh one. This skips Claude Code's first-run setup and trust prompts.
-4. **Drops privileges** with `su-exec` to the `claude` user, disables RTK telemetry, installs
+3. **Hands ownership** of `~/.claude` to the unprivileged `claude` user (the seed copy ran as
+   root).
+4. **Writes `~/.claude.json`** — patches your mounted host copy under the `host` base, or writes
+   a minimal fresh one otherwise. Either way it sets `installMethod: npm-global`, trusts
+   `/workspace`, and pre-accepts Bypass Permissions mode, skipping all first-run prompts.
+5. **Drops privileges** with `su-exec` to the `claude` user, disables RTK telemetry, installs
    the RTK hook, and finally launches:
 
    ```
@@ -163,16 +203,24 @@ off to Claude Code:
 
 | Host                          | Container                  | Purpose                                      |
 | ----------------------------- | -------------------------- | -------------------------------------------- |
-| Your project directory        | `/workspace`               | The code the agent works on.                 |
-| `./claude-home`               | `/home/claude/.claude`     | Project-local Claude config, kept out of your real `~/.claude`. |
-| `~/.claude/.credentials.json` | `/tmp/host-credentials.json` (read-only) | Your host login (run scripts only). |
-| `~/.claude.json`              | `/tmp/host-claude.json` (read-only)      | Host setup state (run scripts only). |
+| Your project directory        | `/workspace`               | The code the agent works on (read-write).    |
+| Curated copy of `~/.claude`   | `/opt/host-claude` (read-only) | The `host` base — only the allowlisted config, staged in a temp dir (run scripts, `CLAUDE_BASE=host`). |
+| `~/.claude/.credentials.json` | `/tmp/host-credentials.json` (read-only) | Your host login (run scripts). |
+| `~/.claude.json`              | `/tmp/host-claude.json` (read-only)      | Host setup state (run scripts, `host` base). |
+
+The `repo` base isn't mounted — it's baked into the image at `/opt/claude-defaults`. The
+container's working config (`/home/claude/.claude`) is its own ephemeral directory, not a mount.
 
 ## Customization
 
-- **Persisted Claude config** lives in `claude-home/`. Edit `claude-home/settings.json` to
-  change the container's theme, hooks, or other Claude Code settings; edit
-  `claude-home/CLAUDE.md` to give the in-container agent standing instructions.
+- **The `repo` base template** lives in `claude-default/`. Edit `claude-default/settings.json`
+  to change the container's theme, hooks, or other Claude Code settings; edit
+  `claude-default/CLAUDE.md` to give the in-container agent standing instructions. These take
+  effect under `CLAUDE_BASE=repo` (and Compose). Rebuild after editing so they're re-baked.
+- **The config base** is chosen per run with [`CLAUDE_BASE`](#configuration-base)
+  (`host` / `repo` / `empty`).
+- **The host allowlist** (what `CLAUDE_BASE=host` copies) is the `HOST_ALLOWLIST` array in
+  `run.sh` and `$hostAllowlist` in `run.ps1`.
 - **Installed tools** are defined in the `Dockerfile`. Add an `apk add` package or another
   `npm install -g` line, then rebuild with `docker build -t claude-sandbox .`.
 - **RTK version** is pinned in the `Dockerfile` (`v0.42.3`). Bump the URL to upgrade.
@@ -183,13 +231,13 @@ off to Claude Code:
 
 | File / dir           | Role                                                              |
 | -------------------- | ---------------------------------------------------------------- |
-| `Dockerfile`         | Builds the Alpine image with Node, git, RTK, and Claude Code.    |
-| `entrypoint.sh`      | Fixes mount ownership, places credentials, drops to the `claude` user, launches Claude Code. |
-| `run.ps1`            | Windows launcher — builds the image if missing, mounts host login. |
+| `Dockerfile`         | Builds the Alpine image with Node, git, RTK, Claude Code, and the baked-in `claude-default/` template. |
+| `entrypoint.sh`      | Seeds `~/.claude` from the chosen base, installs credentials, drops to the `claude` user, launches Claude Code. |
+| `run.ps1`            | Windows launcher — builds the image if missing, stages the curated host base, runs the container. |
 | `run.sh`             | Linux/macOS launcher — same behavior as `run.ps1`.              |
-| `docker-compose.yml` | Compose entry point using the committed `claude-home/` config.  |
-| `claude-home/`       | Project-local Claude config mounted into the container. Config files (`settings.json`, `CLAUDE.md`) are tracked; runtime state (credentials, sessions, history, caches) is git-ignored. |
-| `.dockerignore`      | Keeps `claude-home/`, docs, and `.git` out of the build context. |
+| `docker-compose.yml` | Compose entry point; defaults to the `repo` base.               |
+| `claude-default/`    | The committed `repo` base template (`settings.json`, `CLAUDE.md`, `RTK.md`), baked into the image read-only. The container never writes here. |
+| `.dockerignore`      | Bakes only `claude-default/`'s config files into the image; keeps docs, `.git`, and runtime state out of the build context. |
 
 ## Troubleshooting
 
@@ -211,9 +259,15 @@ Only `/workspace` is mounted. Run the launcher *from* the directory you want Cla
 on, or pass that directory explicitly (`run.sh /path`, `run.ps1 -ProjectPath C:\path`).
 
 **Permission / ownership errors writing config**
-`entrypoint.sh` chowns `~/.claude` on startup to handle root-owned bind mounts. If you still
-hit this, make sure you're launching through the provided scripts (which mount `claude-home`
-correctly) rather than a hand-rolled `docker run`.
+`entrypoint.sh` seeds `~/.claude` as root and then chowns it to the `claude` user. If you hit
+this, make sure you're launching through the provided scripts (which set `CLAUDE_BASE` and the
+mounts correctly) rather than a hand-rolled `docker run`.
+
+**My host customizations aren't showing up in the container**
+The `host` base copies only an [allowlist](#configuration-base) — session history and `plugins/`
+are intentionally excluded. If a config file you need isn't appearing, add it to the
+`HOST_ALLOWLIST` in `run.sh` / `$hostAllowlist` in `run.ps1`. If you're on `docker compose`,
+note it uses the `repo` base and ignores your host config entirely.
 
 **Slow start or "exec format error" on Apple Silicon / ARM**
 The image installs the `x86_64` RTK binary, so on ARM hosts it runs under emulation. Ensure
@@ -231,26 +285,32 @@ The agent can only reach what's mounted: `/workspace` and the read-only credenti
 cannot touch anything else on your machine.
 
 **Where do sessions and history go?**
-Into `claude-home/` on your host, which is mounted as the container's `~/.claude`. Runtime
-state there is git-ignored.
+Into the container's own ephemeral `~/.claude`, which is discarded when the container exits.
+Nothing is written back to your host or the repo. (If you need session persistence across runs,
+that's a deliberate non-goal of the current ephemeral design.)
 
 **Does it work offline?**
 No — Claude Code calls the Anthropic API. You need network access and valid credentials.
 
 **Can I run multiple sandboxes at once?**
-Yes. Each launcher invocation starts an independent `--rm` container. They share the same
-`claude-home/` config directory, so avoid running concurrent sessions that fight over it.
+Yes. Each launcher invocation starts an independent `--rm` container with its own ephemeral
+config, so concurrent sessions don't interfere with each other.
 
 ## Security notes
 
-- `claude-home/.credentials.json` and the rest of `claude-home/`'s runtime state (sessions,
-  history, caches) are **git-ignored** — see `.gitignore`. Don't commit secrets.
-- Host credentials are mounted **read-only** (`:ro`) into `/tmp`; the container copies them
-  into place rather than writing back to your host.
-- The agent only has access to what you mount. It cannot reach your host filesystem outside
-  `/workspace` and the credential mounts above.
+- **Nothing is written back to your host.** Everything from the host (`host` base config,
+  credentials, `~/.claude.json`) is mounted **read-only** (`:ro`); the container copies it into
+  its own writable config. Your real `~/.claude` is never modified.
+- **The `host` base is curated** so the agent can't read your full `~/.claude`. Session history,
+  caches, and `plugins/` never enter the container. The one broad exposure is `~/.claude.json`
+  (mounted only under the `host` base), which contains setup state such as your account id and
+  MCP server definitions — if that matters to you, use `CLAUDE_BASE=repo` instead.
+- The agent only has access to what you mount: `/workspace` (read-write) and the read-only host
+  files above. It cannot reach the rest of your filesystem.
 - `--dangerously-skip-permissions` means the agent acts without asking. The container is the
   safety boundary — don't mount directories you aren't willing to let it modify.
+- Don't commit secrets to `claude-default/` — `.gitignore` guards credentials and runtime
+  state, but the directory is meant to hold only shareable config.
 
 ## License
 

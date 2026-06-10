@@ -14,6 +14,10 @@ RUN addgroup -S claude && adduser -S claude -G claude \
     && mkdir -p /home/claude/.claude /workspace \
     && chown -R claude:claude /home/claude /workspace
 
+# Committed default config, baked in as the read-only "repo" base template. The entrypoint
+# copies it (or a curated host config) into the container's writable ~/.claude at startup.
+COPY claude-default/ /opt/claude-defaults/
+
 COPY entrypoint.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh
 

@@ -1,23 +1,64 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Windows bind mounts appear root-owned inside the container.
-# Fix ownership before dropping privileges so the claude user can write to ~/.claude.
-chown -R claude:claude /home/claude/.claude
+# Which base seeds the container's config:
+#   host  - a curated copy of your real ~/.claude, staged read-only by the run scripts
+#   repo  - the committed claude-default/ template baked into the image
+#   empty - a clean sandbox
+CLAUDE_BASE="${CLAUDE_BASE:-host}"
+CLAUDE_DIR=/home/claude/.claude
 
+# Copy a base directory's contents into the container's writable ~/.claude. The base is always
+# read-only, so the container works on a copy — nothing is ever written back to host or repo.
+seed_from() {
+    local src="$1"
+    [[ -d "$src" ]] || return 0
+    cp -a "$src/." "$CLAUDE_DIR/" 2>/dev/null || true
+}
+
+case "$CLAUDE_BASE" in
+    host)
+        if [[ -d /opt/host-claude ]]; then
+            seed_from /opt/host-claude
+        else
+            echo "[entrypoint] CLAUDE_BASE=host but no host config is mounted (expected with" \
+                 "docker compose). Falling back to the repo default template." >&2
+            CLAUDE_BASE=repo
+            seed_from /opt/claude-defaults
+        fi
+        ;;
+    repo)
+        seed_from /opt/claude-defaults
+        ;;
+    empty)
+        : # clean sandbox — seed nothing
+        ;;
+    *)
+        echo "[entrypoint] Unknown CLAUDE_BASE='$CLAUDE_BASE'; using the repo default template." >&2
+        CLAUDE_BASE=repo
+        seed_from /opt/claude-defaults
+        ;;
+esac
+
+# Credentials are installed independently of the base so any base can authenticate.
+# The run scripts mount the host login read-only; we copy it into place.
 if [[ -f /tmp/host-credentials.json ]]; then
-    cp /tmp/host-credentials.json /home/claude/.claude/.credentials.json
-    chown claude:claude /home/claude/.claude/.credentials.json
+    cp /tmp/host-credentials.json "$CLAUDE_DIR/.credentials.json"
 fi
 
-# ~/.claude.json holds Claude Code's full setup state (numStartups, feature flags, etc.).
-# We patch three things so a freshly created container starts straight into Claude Code:
-#   - installMethod -> npm-global (the host says "native", but we install via npm here)
-#   - /workspace marked trusted        -> skips the folder-trust prompt
-#   - bypassPermissionsModeAccepted    -> skips the one-time "Bypass Permissions mode" warning
-# Without the last flag the warning reappears on every fresh container, since this file is
-# regenerated each run.
-if [[ -f /tmp/host-claude.json ]]; then
+# ~/.claude is the container's own directory (not a mount), but the seed copy ran as root —
+# hand it to the unprivileged claude user before it starts writing session state.
+chown -R claude:claude "$CLAUDE_DIR"
+
+# ~/.claude.json holds Claude Code's setup state (numStartups, feature flags, project trust).
+# Only inherit the host's copy under the host base; for repo/empty write a minimal file so the
+# sandbox doesn't carry over host projects, MCP servers, or trust decisions. In every case we
+# set:
+#   installMethod=npm-global          - the host says "native", but we install via npm here
+#   /workspace trusted                - skips the folder-trust prompt
+#   bypassPermissionsModeAccepted     - skips the one-time "Bypass Permissions mode" warning,
+#                                       which would otherwise reappear on every fresh container
+if [[ "$CLAUDE_BASE" == host && -f /tmp/host-claude.json ]]; then
     node -e "
 const fs = require('fs');
 const c = JSON.parse(fs.readFileSync('/tmp/host-claude.json', 'utf8'));

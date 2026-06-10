@@ -3,8 +3,12 @@ services:
     build: .
     environment:
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
+      # Compose can't portably reference your host ~/.claude, so it defaults to the committed
+      # repo template. Override with CLAUDE_BASE=empty for a clean sandbox. (CLAUDE_BASE=host
+      # has nothing to seed from here and falls back to repo with a warning — use run.sh/run.ps1
+      # for host config.)
+      - CLAUDE_BASE=${CLAUDE_BASE:-repo}
     volumes:
       - ${WORKSPACE:-.}:/workspace        # mount current dir, or override with WORKSPACE=
-      - ./claude-home:/home/claude/.claude  # project-local config, not the host ~/.claude
     stdin_open: true
     tty: true

@@ -1,10 +1,11 @@
-# Claude runtime data — credentials and session state should never be committed
-claude-home/.credentials.json
-claude-home/sessions/
-claude-home/projects/
-claude-home/session-env/
-claude-home/shell-snapshots/
-claude-home/backups/
-claude-home/cache/
-claude-home/history.jsonl
-claude-home/.last-cleanup
+# claude-default/ is a read-only template; the container never writes to it. These guards
+# only matter if you ever populate it by hand — credentials and runtime state stay out of git.
+claude-default/.credentials.json
+claude-default/sessions/
+claude-default/projects/
+claude-default/session-env/
+claude-default/shell-snapshots/
+claude-default/backups/
+claude-default/cache/
+claude-default/history.jsonl
+claude-default/.last-cleanup

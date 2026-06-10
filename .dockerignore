@@ -1,4 +1,12 @@
 .git
-*.md
 run.ps1
-claude-home
+*.md
+
+# Bake only the committed claude-default config files into the image (as /opt/claude-defaults).
+# Exclude everything under claude-default, then re-include the tracked config files — runtime
+# state (sessions/, history.jsonl, .credentials.json, caches) must never enter the build context.
+# Re-includes come last so they win over the broad excludes above.
+claude-default/*
+!claude-default/settings.json
+!claude-default/CLAUDE.md
+!claude-default/RTK.md
