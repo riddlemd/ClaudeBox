@@ -7,3 +7,4 @@ claude-home/shell-snapshots/
 claude-home/backups/
 claude-home/cache/
 claude-home/history.jsonl
+claude-home/.last-cleanup
