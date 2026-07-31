@@ -1,6 +1,7 @@
 .git
 run.ps1
 *.md
+docs/
 
 # Bake only the committed claude-default config files into the image (as /opt/claude-defaults).
 # Exclude everything under claude-default, then re-include the tracked config files — runtime

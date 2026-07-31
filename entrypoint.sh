@@ -107,7 +107,7 @@ cat <<'BANNER'
 BANNER
 printf '%s%s        sandboxed Claude Code — your host filesystem is isolated%s\n\n' "$CB_R" "$CB_D" "$CB_R"
 
-exec su-exec claude bash -c '
+exec gosu claude bash -c '
   rtk telemetry disable >/dev/null 2>&1
   rtk init -g --auto-patch >/dev/null 2>&1
   exec claude --dangerously-skip-permissions --add-dir /workspace

@@ -5,10 +5,12 @@ container. The agent runs with `--dangerously-skip-permissions` (no per-action a
 prompts), but it can only see what you explicitly mount — your real home directory and the
 rest of your filesystem stay untouched.
 
-The container is built on `node:lts-alpine` and ships with `git`, `bash`, `curl`,
+The container is built on `node:lts-trixie-slim` and ships with `git`, `bash`, `curl`,
 [RTK](https://github.com/rtk-ai/rtk) (a token-saving command wrapper, telemetry disabled),
 and the Claude Code CLI. It runs as a non-root `claude` user because Claude Code refuses to
 run as root when permissions are skipped.
+
+![ClaudeBox running Claude Code in a container, with the sandbox indicator in the status line](docs/screenshot.png)
 
 ## Why use this?
 
@@ -46,10 +48,11 @@ run as root when permissions are skipped.
 
   Either way, make sure the engine is installed and its daemon is running before you launch.
 - **Auth** — either an `ANTHROPIC_API_KEY` environment variable, or an existing Claude Code
-  login on your host (`~/.claude/.credentials.json`).
+  login on your host (`~/.claude/.credentials.json`, or the login Keychain on macOS).
 
-> **Architecture note:** the image pulls the `x86_64` (amd64) build of RTK. On Apple Silicon
-> or other ARM hosts it runs under emulation. See [Troubleshooting](#troubleshooting).
+> **Architecture note:** the image builds natively on both `amd64` and `arm64` — the
+> `Dockerfile` selects the matching RTK binary from `TARGETARCH`, so Apple Silicon needs no
+> emulation.
 
 ## Quick start
 
@@ -169,6 +172,9 @@ Credentials are handled **independently of the base**, so any base can authentic
 
 - **Host login** — the run scripts mount `~/.claude/.credentials.json` read-only at
   `/tmp/host-credentials.json`; `entrypoint.sh` copies it into the container's config.
+- **macOS Keychain** — macOS stores the login in the Keychain rather than a file, so `run.sh`
+  exports the `Claude Code-credentials` item to a mode-`600` temp file, mounts that, and
+  deletes it when the container exits. The first run raises a Keychain access prompt.
 - **API key** — if you set `ANTHROPIC_API_KEY`, it's passed through to the container.
 
 If neither is available, the run scripts exit with an error before starting the container.
@@ -188,7 +194,7 @@ off to Claude Code:
    a minimal fresh one otherwise. Either way it sets `installMethod: npm-global`,
    `hasCompletedOnboarding: true`, and trusts `/workspace`, so Claude Code skips the setup wizard
    and folder-trust prompt and never asks the user for any details.
-5. **Drops privileges** with `su-exec` to the `claude` user, disables RTK telemetry, installs
+5. **Drops privileges** with `gosu` to the `claude` user, disables RTK telemetry, installs
    the RTK hook, and finally launches:
 
    ```
@@ -217,7 +223,7 @@ container's working config (`/home/claude/.claude`) is its own ephemeral directo
   (`host` / `repo` / `empty`).
 - **The host allowlist** (what `CLAUDE_BASE=host` copies) is the `HOST_ALLOWLIST` array in
   `run.sh` and `$hostAllowlist` in `run.ps1`.
-- **Installed tools** are defined in the `Dockerfile`. Add an `apk add` package or another
+- **Installed tools** are defined in the `Dockerfile`. Add an `apt-get install` package or another
   `npm install -g` line, then rebuild with `docker build -t claude-sandbox .`.
 - **RTK version** is pinned in the `Dockerfile` (`v0.42.3`). Bump the URL to upgrade.
 - **Default mounted directory** for Compose is controlled by the `WORKSPACE` variable in
@@ -227,7 +233,7 @@ container's working config (`/home/claude/.claude`) is its own ephemeral directo
 
 | File / dir           | Role                                                              |
 | -------------------- | ---------------------------------------------------------------- |
-| `Dockerfile`         | Builds the Alpine image with Node, git, RTK, Claude Code, and the baked-in `claude-default/` template. |
+| `Dockerfile`         | Builds the Debian image with Node, git, RTK, Claude Code, and the baked-in `claude-default/` template. Picks the RTK binary per `TARGETARCH`. |
 | `entrypoint.sh`      | Seeds `~/.claude` from the chosen base, installs credentials, drops to the `claude` user, launches Claude Code. |
 | `run.ps1`            | Windows launcher — builds the image if missing, mounts credentials, stages the curated host base when `-Base host`, runs the container. |
 | `run.sh`             | Linux/macOS launcher — same behavior as `run.ps1`.              |
@@ -265,10 +271,15 @@ are intentionally excluded. If a config file you need isn't appearing, add it to
 `HOST_ALLOWLIST` in `run.sh` / `$hostAllowlist` in `run.ps1`. If you're on `docker compose`,
 note it uses the `repo` base and ignores your host config entirely.
 
-**Slow start or "exec format error" on Apple Silicon / ARM**
-The image installs the `x86_64` RTK binary, so on ARM hosts it runs under emulation. Ensure
-your Docker setup has emulation enabled (Rosetta/QEMU), or swap the RTK download URL in the
-`Dockerfile` for an `aarch64` build and rebuild.
+**`GLIBC_2.39 not found` when building**
+RTK's `aarch64` build needs glibc 2.39 or newer, which is why the base is Debian trixie
+(glibc 2.41) rather than bookworm (2.36). If you re-pin the `FROM` line to an older Debian
+release, the build fails at the `rtk --version` smoke test.
+
+**macOS: "no Claude Code credentials in the macOS Keychain"**
+`run.sh` looks for the `Claude Code-credentials` Keychain item. Run `claude` once on the host
+to log in, or export `ANTHROPIC_API_KEY` instead. If macOS shows a Keychain access prompt,
+approve it — the launcher needs to read that item to pass your login into the container.
 
 **Changes to the `Dockerfile` aren't taking effect**
 The launchers only build when the image is *absent*. After editing the `Dockerfile`, rebuild
