@@ -10,11 +10,28 @@ if (-not (Get-Command docker -ErrorAction SilentlyContinue)) {
     exit 1
 }
 
-# Build the image on first run (or if it was removed).
+function Build-Image([string]$Version = "latest") {
+    docker build --build-arg "CLAUDE_VERSION=$Version" -t claude-sandbox $PSScriptRoot
+    if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+}
+
+# Build on first run (or if the image was removed), otherwise keep Claude Code current. Both
+# probes run inside the image, so the host needs nothing beyond Docker. Set
+# CLAUDEBOX_SKIP_UPDATE_CHECK=1 to skip the registry round trip.
 if (-not (docker images -q claude-sandbox)) {
     Write-Host "Building claude-sandbox image..."
-    docker build -t claude-sandbox $PSScriptRoot
-    if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+    Build-Image "latest"
+} elseif (-not $env:CLAUDEBOX_SKIP_UPDATE_CHECK) {
+    $latest = (docker run --rm --entrypoint npm claude-sandbox `
+               view '@anthropic-ai/claude-code' version 2>$null | Select-Object -Last 1)
+    $installed = (docker run --rm --entrypoint claude claude-sandbox --version 2>$null `
+                  | ForEach-Object { $_.Split(' ')[0] } | Select-Object -First 1)
+    # Empty means offline or a registry hiccup — launch the image we already have rather than
+    # blocking, and never rebuild on a probe we could not actually compare.
+    if ($latest -and $installed -and ($latest -ne $installed)) {
+        Write-Host "Claude Code $installed -> $latest; rebuilding..."
+        Build-Image $latest
+    }
 }
 
 $hostClaudeDir = Join-Path $env:USERPROFILE ".claude"

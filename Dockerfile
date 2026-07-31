@@ -20,7 +20,11 @@ RUN case "$TARGETARCH" in \
     && chmod +x /usr/local/bin/rtk \
     && rtk --version
 
-RUN npm install -g @anthropic-ai/claude-code
+# The launcher resolves the current release and passes it in, so a new Claude Code version
+# invalidates this layer on its own — without it, Docker reuses the cached layer forever and
+# the container silently stays on whatever shipped the day the image was first built.
+ARG CLAUDE_VERSION=latest
+RUN npm install -g "@anthropic-ai/claude-code@${CLAUDE_VERSION}"
 
 # Non-root user — claude --dangerously-skip-permissions refuses to run as root
 RUN groupadd --system claude \

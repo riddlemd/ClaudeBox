@@ -226,8 +226,33 @@ container's working config (`/home/claude/.claude`) is its own ephemeral directo
 - **Installed tools** are defined in the `Dockerfile`. Add an `apt-get install` package or another
   `npm install -g` line, then rebuild with `docker build -t claude-sandbox .`.
 - **RTK version** is pinned in the `Dockerfile` (`v0.42.3`). Bump the URL to upgrade.
+- **Claude Code version** is not pinned — see [Staying up to date](#staying-up-to-date). To lock
+  it, build with `docker build --build-arg CLAUDE_VERSION=2.1.220 -t claude-sandbox .` and set
+  `CLAUDEBOX_SKIP_UPDATE_CHECK=1` so the launcher stops upgrading it.
 - **Default mounted directory** for Compose is controlled by the `WORKSPACE` variable in
   `docker-compose.yml`.
+
+## Staying up to date
+
+Claude Code ships frequently, and a container image would otherwise freeze whatever version was
+current the day it was built — Docker caches the `npm install` layer, so even a plain
+`docker build` won't move it. The launchers handle this instead of the repo pinning a version
+and cutting a commit per release:
+
+1. Ask the npm registry for the current release, and ask the image what it has. Both probes run
+   *inside* the image, so your host needs nothing beyond Docker (~0.5s total).
+2. If they differ, rebuild with `--build-arg CLAUDE_VERSION=<new>`. Passing the version as a
+   build arg is what invalidates the cached layer; a bare rebuild would silently reuse it.
+3. Otherwise launch immediately.
+
+A rebuild costs a few seconds and only happens when a release actually lands. If either probe
+fails — offline, registry hiccup — the launcher uses the image you already have rather than
+blocking. Set `CLAUDEBOX_SKIP_UPDATE_CHECK=1` to skip the check entirely.
+
+> Compose does not do this — it has no launcher to run the check. `docker compose build` alone
+> won't help either, since it hits the same cached layer. Force it with
+> `docker compose build --build-arg CLAUDE_VERSION=$(npm view @anthropic-ai/claude-code version)`,
+> or `docker compose build --no-cache`.
 
 ## Project layout
 
@@ -282,8 +307,9 @@ to log in, or export `ANTHROPIC_API_KEY` instead. If macOS shows a Keychain acce
 approve it — the launcher needs to read that item to pass your login into the container.
 
 **Changes to the `Dockerfile` aren't taking effect**
-The launchers only build when the image is *absent*. After editing the `Dockerfile`, rebuild
-explicitly: `docker build -t claude-sandbox .` (add `--no-cache` to bypass the layer cache).
+The launchers build only when the image is *absent* or when Claude Code is out of date — they
+don't notice your edits. After editing the `Dockerfile`, rebuild explicitly:
+`docker build -t claude-sandbox .` (add `--no-cache` to bypass the layer cache).
 
 ## FAQ
 

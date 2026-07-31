@@ -48,10 +48,27 @@ if [[ -z "${ANTHROPIC_API_KEY:-}" ]] && [[ ! -f "$HOST_CREDS" ]]; then
     exit 1
 fi
 
-# Build the image on first run (or if it was removed).
+build_image() {
+    docker build --build-arg "CLAUDE_VERSION=${1:-latest}" -t claude-sandbox "$SCRIPT_DIR"
+}
+
+# Build on first run (or if the image was removed), otherwise keep Claude Code current. Both
+# probes run inside the image, so the host needs nothing beyond Docker. Set
+# CLAUDEBOX_SKIP_UPDATE_CHECK=1 to skip the ~0.4s registry round trip.
 if [[ -z "$(docker images -q claude-sandbox 2>/dev/null)" ]]; then
     echo "Building claude-sandbox image..."
-    docker build -t claude-sandbox "$SCRIPT_DIR"
+    build_image latest
+elif [[ -z "${CLAUDEBOX_SKIP_UPDATE_CHECK:-}" ]]; then
+    latest="$(docker run --rm --entrypoint npm claude-sandbox \
+              view @anthropic-ai/claude-code version 2>/dev/null | tr -d '\r' | tail -1)"
+    installed="$(docker run --rm --entrypoint claude claude-sandbox --version 2>/dev/null \
+                 | awk '{print $1}')"
+    # Empty means offline or a registry hiccup — launch the image we already have rather than
+    # blocking, and never rebuild on a probe we could not actually compare.
+    if [[ -n "$latest" && -n "$installed" && "$latest" != "$installed" ]]; then
+        echo "Claude Code $installed -> $latest; rebuilding..."
+        build_image "$latest"
+    fi
 fi
 
 DOCKER_ARGS=(-e "CLAUDE_BASE=$CLAUDE_BASE")
